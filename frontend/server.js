@@ -95,3 +95,4 @@ process.on('SIGTERM', () => {
   console.log('[frontend] SIGTERM received, draining connections...');
   server.close(() => process.exit(0));
 });
+

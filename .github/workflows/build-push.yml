@@ -38,6 +38,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         service:
@@ -75,7 +78,6 @@ jobs:
       - name: Build, Tag and Push to ECR
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: git-${{ github.sha }}
         run: |
           SHORT_TAG="git-${GITHUB_SHA::7}"
           FULL_IMAGE="$REGISTRY/${{ matrix.service.repo }}:$SHORT_TAG"

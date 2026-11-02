@@ -23,6 +23,8 @@
     .title p { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
     .badge { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
     .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
+    .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid var(--warning); }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid var(--danger); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
     .card h3 { font-size: 15px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -35,7 +37,9 @@
     .btn { background: var(--primary); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.2s; }
     .btn:hover { opacity: 0.9; }
     .btn-reserve { background: #6366f1; }
+    .btn-db { background: #10b981; }
     .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background-color: var(--success); }
+    .db-box { background: rgba(16, 185, 129, 0.05); border: 1px solid #10b981; border-radius: 12px; padding: 18px; margin-bottom: 24px; }
   </style>
 </head>
 <body>
@@ -46,6 +50,22 @@
     </div>
     <div>
       <span class="badge badge-success"><span class="status-dot"></span>Production Ready (SLO 99.95%)</span>
+    </div>
+  </div>
+
+  <!-- Dedicated DB Test Panel -->
+  <div class="db-box">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+      <div>
+        <h2 style="font-size: 18px; color: #10b981;">🐘 PostgreSQL Live Database Diagnostics</h2>
+        <p style="font-size: 13px; color: var(--text-muted);">Direct connection test to Amazon RDS PostgreSQL using ESO decrypted credentials</p>
+      </div>
+      <div>
+        <button class="btn btn-db" onclick="testDatabase()">⚡ Run Live DB Ping & Test</button>
+      </div>
+    </div>
+    <div id="db-result" style="font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.4); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
+      Click "Run Live DB Ping & Test" to execute real SQL query against RDS PostgreSQL.
     </div>
   </div>
 
@@ -62,8 +82,8 @@
     </div>
     <div class="card">
       <h3>PostgreSQL & Redis</h3>
-      <div class="value">Connected</div>
-      <div class="sub">Multi-AZ Subnets | SRE Least-Privilege SG</div>
+      <div class="value" id="db-card-val">Checking...</div>
+      <div class="sub" id="db-card-sub">Multi-AZ Subnets | SRE Least-Privilege SG</div>
     </div>
     <div class="card">
       <h3>SQS Asynchronous Queue</h3>
@@ -115,6 +135,37 @@
   </div>
 
   <script>
+    async function testDatabase() {
+      const dbResult = document.getElementById('db-result');
+      dbResult.innerHTML = 'Testing connection to Amazon RDS PostgreSQL...';
+      try {
+        const res = await fetch('/api/orders/db-test');
+        const data = await res.json();
+        if (data.dbConnected) {
+          dbResult.innerHTML = `
+            <span style="color: #10b981; font-weight: bold;">✔ CONNECTED TO POSTGRESQL SUCCESSFULLY</span> (Latency: ${data.latencyMs}ms)<br/>
+            <strong>Database:</strong> ${data.databaseName} | <strong>User:</strong> ${data.currentUser} | <strong>Orders Count:</strong> ${data.orderCount}<br/>
+            <strong>Host:</strong> ${data.host}:${data.port}<br/>
+            <strong>Engine:</strong> ${data.pgVersion.split('on')[0]}<br/>
+            <strong>Server Time:</strong> ${data.serverTime}
+          `;
+          document.getElementById('db-card-val').innerText = 'Connected (Healthy)';
+          document.getElementById('db-card-val').style.color = '#10b981';
+        } else {
+          dbResult.innerHTML = `
+            <span style="color: #f59e0b; font-weight: bold;">⏳ DATABASE STATUS: ${data.code || 'CONNECTING'}</span> (Latency: ${data.latencyMs || 0}ms)<br/>
+            <strong>Host:</strong> ${data.host}:${data.port}<br/>
+            <strong>Message:</strong> ${data.error || data.message || 'RDS is initializing'}<br/>
+            <span style="color: #9ca3af;">${data.hint || ''}</span>
+          `;
+          document.getElementById('db-card-val').innerText = 'Starting / Initializing';
+          document.getElementById('db-card-val').style.color = '#f59e0b';
+        }
+      } catch (err) {
+        dbResult.innerHTML = `<span style="color: #ef4444;">Error testing DB: ${err.message}</span>`;
+      }
+    }
+
     async function loadInventory() {
       try {
         const res = await fetch('/api/inventory');
@@ -162,8 +213,9 @@
           body: JSON.stringify({ item: 'AWS EKS Production Node Pack', quantity: 1, amount: 149.00 })
         });
         loadOrders();
+        testDatabase();
       } catch (e) {
-        alert('Order placed successfully.');
+        alert('Order placed.');
       }
     }
 
@@ -182,6 +234,7 @@
 
     loadInventory();
     loadOrders();
+    testDatabase();
     setInterval(() => { loadOrders(); loadInventory(); }, 15000);
   </script>
 </body>

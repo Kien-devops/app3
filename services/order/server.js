@@ -4,24 +4,68 @@ const url = require('url');
 const PORT = process.env.PORT || 8080;
 const SERVICE_NAME = 'order-service';
 
-// ESO Credentials
-const DB_USER = process.env.DB_USER || 'sre_admin';
+// Database & ESO Configuration
+const DB_HOST = process.env.DB_HOST || 'sre-platform-dev-pg.c1ky6i8iomcn.ap-southeast-1.rds.amazonaws.com';
+const DB_PORT = parseInt(process.env.DB_PORT || '5432', 10);
 const DB_NAME = process.env.DB_NAME || 'reliability_shop';
+const DB_USER = process.env.DB_USER || 'sre_admin';
+const DB_PASSWORD = process.env.DB_PASSWORD || '';
 const SQS_QUEUE_URL = process.env.SQS_QUEUE_URL || '';
 
-// In-memory order storage
-const orders = [
+let pgPool = null;
+let pgStatus = { connected: false, error: null, lastChecked: null };
+
+try {
+  const { Pool } = require('pg');
+  if (DB_PASSWORD) {
+    pgPool = new Pool({
+      host: DB_HOST,
+      port: DB_PORT,
+      database: DB_NAME,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      ssl: false,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 10000
+    });
+
+    // Test connection on boot and create table if not exists
+    pgPool.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id VARCHAR(64) PRIMARY KEY,
+        item VARCHAR(255) NOT NULL,
+        quantity INT NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        customer VARCHAR(255),
+        status VARCHAR(64),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `).then(() => {
+      pgStatus = { connected: true, error: null, lastChecked: new Date().toISOString() };
+      console.log(`[${SERVICE_NAME}] Connected to PostgreSQL (${DB_HOST}:${DB_PORT}/${DB_NAME})`);
+    }).catch(err => {
+      pgStatus = { connected: false, error: err.message, lastChecked: new Date().toISOString() };
+      console.warn(`[${SERVICE_NAME}] PostgreSQL initialization warning:`, err.message);
+    });
+  }
+} catch (e) {
+  console.log(`[${SERVICE_NAME}] running in mock db mode`);
+}
+
+// In-memory fallback
+const memoryOrders = [
   {
     id: 'ord-1001',
     item: 'AWS Cloud-Native SRE Handbook',
     quantity: 1,
     amount: 49.99,
+    customer: 'Platform Architect',
     status: 'COMPLETED',
     createdAt: new Date(Date.now() - 3600000).toISOString()
   }
 ];
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   const { pathname } = parsed;
 
@@ -42,12 +86,12 @@ const server = http.createServer((req, res) => {
       status: 'UP',
       service: SERVICE_NAME,
       uptime: process.uptime(),
-      dbConnected: Boolean(process.env.DB_PASSWORD),
-      databaseUser: DB_USER,
-      databaseName: DB_NAME,
+      dbConnected: pgStatus.connected,
+      dbHost: DB_HOST,
+      dbUser: DB_USER,
+      dbName: DB_NAME,
       redisConnected: Boolean(process.env.REDIS_AUTH),
       sqsConfigured: Boolean(SQS_QUEUE_URL),
-      ordersCount: orders.length,
       timestamp: new Date().toISOString()
     }));
   }
@@ -57,36 +101,102 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ status: 'READY', service: SERVICE_NAME }));
   }
 
-  // Metrics endpoint for Prometheus
-  if (pathname === '/metrics') {
-    res.setHeader('Content-Type', 'text/plain');
-    return res.end(
-      `# HELP http_requests_total Total HTTP Requests\n` +
-      `# TYPE http_requests_total counter\n` +
-      `http_requests_total{service="order-service",status="200"} ${orders.length * 5}\n` +
-      `order_processing_count{service="order-service"} ${orders.length}\n`
-    );
+  // Live Database Test & Ping Endpoint
+  if (pathname === '/api/orders/db-test') {
+    const startTime = Date.now();
+    if (!pgPool) {
+      res.statusCode = 200;
+      return res.end(JSON.stringify({
+        dbConnected: false,
+        source: 'MOCK_DRIVER',
+        message: 'DB_PASSWORD not loaded or pg library not initialized.',
+        config: { host: DB_HOST, port: DB_PORT, database: DB_NAME, user: DB_USER }
+      }));
+    }
+
+    try {
+      const client = await pgPool.connect();
+      try {
+        const result = await client.query(`
+          SELECT 
+            NOW() as server_time,
+            current_database() as database_name,
+            current_user as current_user,
+            version() as pg_version,
+            (SELECT count(*) FROM orders) as order_count;
+        `);
+        const latencyMs = Date.now() - startTime;
+        res.statusCode = 200;
+        return res.end(JSON.stringify({
+          dbConnected: true,
+          latencyMs,
+          serverTime: result.rows[0].server_time,
+          databaseName: result.rows[0].database_name,
+          currentUser: result.rows[0].current_user,
+          orderCount: parseInt(result.rows[0].order_count, 10),
+          pgVersion: result.rows[0].pg_version,
+          host: DB_HOST,
+          port: DB_PORT
+        }));
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      const latencyMs = Date.now() - startTime;
+      res.statusCode = 200;
+      return res.end(JSON.stringify({
+        dbConnected: false,
+        latencyMs,
+        error: err.message,
+        code: err.code || 'CONNECT_ERROR',
+        hint: 'If RDS is starting, wait 1-2 minutes for status=available.',
+        host: DB_HOST,
+        port: DB_PORT,
+        database: DB_NAME,
+        user: DB_USER
+      }));
+    }
   }
 
-  // Orders API
+  // Get orders (reads from DB if available, else memory)
   if (pathname === '/api/orders' && req.method === 'GET') {
+    if (pgPool && pgStatus.connected) {
+      try {
+        const result = await pgPool.query('SELECT * FROM orders ORDER BY created_at DESC LIMIT 20');
+        res.statusCode = 200;
+        return res.end(JSON.stringify({
+          success: true,
+          source: 'POSTGRESQL_RDS',
+          orders: result.rows.map(r => ({
+            id: r.id,
+            item: r.item,
+            quantity: r.quantity,
+            amount: parseFloat(r.amount),
+            customer: r.customer,
+            status: r.status,
+            createdAt: r.created_at
+          })),
+          metadata: { dbHost: DB_HOST, dbUser: DB_USER, dbName: DB_NAME }
+        }));
+      } catch (err) {
+        console.warn('DB query error, falling back to memory:', err.message);
+      }
+    }
+
     res.statusCode = 200;
     return res.end(JSON.stringify({
       success: true,
-      orders,
-      metadata: {
-        dbUser: DB_USER,
-        dbName: DB_NAME,
-        redisAuthLoaded: Boolean(process.env.REDIS_AUTH),
-        sqsQueueUrl: SQS_QUEUE_URL || 'local-mock-queue'
-      }
+      source: 'IN_MEMORY_FALLBACK',
+      orders: memoryOrders,
+      metadata: { dbHost: DB_HOST, dbUser: DB_USER, dbName: DB_NAME }
     }));
   }
 
+  // Place order
   if (pathname === '/api/orders' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
         const newOrder = {
@@ -99,12 +209,27 @@ const server = http.createServer((req, res) => {
           createdAt: new Date().toISOString()
         };
 
-        orders.push(newOrder);
+        let storageMode = 'IN_MEMORY';
+        if (pgPool) {
+          try {
+            await pgPool.query(
+              'INSERT INTO orders (id, item, quantity, amount, customer, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+              [newOrder.id, newOrder.item, newOrder.quantity, newOrder.amount, newOrder.customer, newOrder.status, newOrder.createdAt]
+            );
+            storageMode = 'POSTGRESQL_RDS';
+          } catch (e) {
+            console.warn('Failed to insert into PostgreSQL, falling back to memory:', e.message);
+            memoryOrders.push(newOrder);
+          }
+        } else {
+          memoryOrders.push(newOrder);
+        }
 
         res.statusCode = 201;
         return res.end(JSON.stringify({
           success: true,
           order: newOrder,
+          storage: storageMode,
           dispatchedToQueue: SQS_QUEUE_URL ? 'reliability-shop-dev-order-queue' : 'mock-sqs'
         }));
       } catch (err) {
@@ -124,6 +249,7 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 process.on('SIGTERM', () => {
-  console.log(`[${SERVICE_NAME}] SIGTERM received, draining HTTP connections...`);
+  console.log(`[${SERVICE_NAME}] SIGTERM received, closing pool...`);
+  if (pgPool) pgPool.end();
   server.close(() => process.exit(0));
 });

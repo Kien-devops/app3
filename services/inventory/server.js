@@ -96,3 +96,4 @@ process.on('SIGTERM', () => {
   console.log(`[${SERVICE_NAME}] SIGTERM received, shutting down gracefully...`);
   server.close(() => process.exit(0));
 });
+

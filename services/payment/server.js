@@ -44,3 +44,4 @@ process.on('SIGTERM', () => {
   clearInterval(pollInterval);
   server.close(() => process.exit(0));
 });
+

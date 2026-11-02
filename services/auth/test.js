@@ -16,3 +16,4 @@ test('Auth Service Unit Tests - Token Sign and Verify', () => {
   const parsed = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
   assert.strictEqual(parsed.sub, 'test-user');
 });
+
