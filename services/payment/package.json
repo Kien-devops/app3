@@ -6,6 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1161.0",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1"
   }
 }
-

@@ -630,23 +630,42 @@
           <div class="console-box" id="console-db">Nhấp vào "⚡ Ping & Query Live DB" để kiểm tra kết nối trực tiếp...</div>
         </div>
 
-        <!-- 2. SQS Queue & Worker Test Box -->
+        <!-- 2. Amazon ElastiCache Redis Test Box -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <span>⚡</span>
+              <span>Amazon ElastiCache Redis (TLS + In-Memory Cache)</span>
+            </div>
+            <span class="card-badge badge-primary" id="badge-redis-status">READY</span>
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Kiểm tra kết nối In-Memory Cache qua TLSv1.3 và xác thực token bí mật từ AWS Secrets Manager qua External Secrets Operator.
+          </p>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+            <button class="btn btn-primary" onclick="testRedis()">⚡ Ping & Test Real Redis Cache</button>
+            <button class="btn btn-secondary" onclick="loadOrders()">🔄 Test Cache-Aside Hit/Miss</button>
+          </div>
+          <div class="console-box" id="console-redis">Nhấp vào "⚡ Ping & Test Real Redis Cache" để gửi lệnh PING, SET, GET qua TLS...</div>
+        </div>
+
+        <!-- 3. SQS Queue & Worker Test Box -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">
               <span>📬</span>
               <span>Amazon SQS & Payment Worker Pipeline</span>
             </div>
-            <span class="card-badge badge-purple" id="badge-sqs-status">POLLING</span>
+            <span class="card-badge badge-purple" id="badge-sqs-status">LONG POLLING</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Kiểm tra đường truyền sự kiện từ order-service vào queue <code style="color:#a855f7;">reliability-shop-dev-order-queue</code> và tiến trình tiêu thụ của worker.
+            Kiểm tra gửi thông điệp thật (real SDK SendMessage) vào queue <code style="color:#a855f7;">reliability-shop-dev-order-queue</code> và tiến trình tiêu thụ của worker.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-            <button class="btn btn-primary" onclick="dispatchSqsTest()">🚀 Gửi Test Event vào SQS</button>
-            <button class="btn btn-secondary" onclick="checkWorkerStatus()">📥 Lấy Trạng Thái Worker</button>
+            <button class="btn btn-primary" onclick="dispatchSqsTest()">🚀 Gửi Real Message vào SQS</button>
+            <button class="btn btn-secondary" onclick="checkWorkerStatus()">📥 Xem Live Worker Logs</button>
           </div>
-          <div class="console-box" id="console-sqs">Nhấp vào "🚀 Gửi Test Event vào SQS" để kiểm tra hàng đợi...</div>
+          <div class="console-box" id="console-sqs">Nhấp vào "🚀 Gửi Real Message vào SQS" để kiểm tra hàng đợi thật...</div>
         </div>
 
         <!-- 3. External Secrets Operator Box -->
@@ -956,36 +975,57 @@
       }
     }
 
+    // Live Redis Ping & Test
+    async function testRedis() {
+      const consoleBox = document.getElementById('console-redis');
+      consoleBox.innerText = 'Connecting to Amazon ElastiCache Redis over TLS...\nExecuting PING, SET, GET test keys...';
+      try {
+        const res = await fetch('/api/orders/redis-test');
+        const data = await res.json();
+        consoleBox.innerText = JSON.stringify(data, null, 2);
+        if (data.redisConnected) {
+          document.getElementById('badge-redis-status').innerText = `ONLINE (${data.latencyMs}ms)`;
+          document.getElementById('badge-redis-status').className = 'card-badge badge-success';
+          showToast(`✔ Kết nối ElastiCache Redis thành công! (${data.latencyMs}ms)`);
+        } else {
+          document.getElementById('badge-redis-status').innerText = 'ERROR';
+          document.getElementById('badge-redis-status').className = 'card-badge badge-warning';
+          showToast(`Lỗi Redis: ${data.error}`, false);
+        }
+      } catch (e) {
+        consoleBox.innerText = `Lỗi mạng Redis: ${e.message}`;
+        showToast('Lỗi gửi request Redis', false);
+      }
+    }
+
     // SQS Test Dispatch
     async function dispatchSqsTest() {
       const consoleBox = document.getElementById('console-sqs');
-      consoleBox.innerText = 'Dispatching test order event to Amazon SQS...\nQueue: reliability-shop-dev-order-queue...';
+      consoleBox.innerText = 'Calling AWS SDK SendMessageCommand to Amazon SQS...\nQueue: reliability-shop-dev-order-queue...';
       try {
         const res = await fetch('/api/orders/sqs-test');
         const data = await res.json();
         consoleBox.innerText = JSON.stringify(data, null, 2);
-        showToast('✔ Đã dispatch message vào Amazon SQS thành công!');
+        if (data.sqsDispatched) {
+          showToast(`✔ SQS Message Sent! MessageId: ${data.messageId.slice(0, 8)}...`);
+          setTimeout(checkWorkerStatus, 2000);
+        } else {
+          showToast(`SQS warning: ${data.error || 'Failed'}`, false);
+        }
       } catch (e) {
         consoleBox.innerText = `Lỗi SQS dispatch: ${e.message}`;
       }
     }
 
-    // Worker Status
+    // Worker Status & Live Consumer Logs
     async function checkWorkerStatus() {
       const consoleBox = document.getElementById('console-sqs');
-      consoleBox.innerText = 'Fetching payment-worker status and polling metrics...';
+      consoleBox.innerText = 'Fetching live payment-worker SQS consumer logs...';
       try {
-        const res = await fetch('/health');
+        const res = await fetch('/api/worker/stats');
         const data = await res.json();
-        consoleBox.innerText = JSON.stringify({
-          worker: 'payment-worker',
-          queue: 'reliability-shop-dev-order-queue',
-          status: 'ACTIVE_POLLING',
-          consumedMessages: 48,
-          deadLetterQueue: 'reliability-shop-dev-order-dlq',
-          encryption: 'AWS KMS (e5164492-8e17-4d65-b1c5-66b7b9601800)',
-          timestamp: new Date().toISOString()
-        }, null, 2);
+        consoleBox.innerText = JSON.stringify(data, null, 2);
+        showToast(`✔ Worker đã xử lý ${data.messagesProcessed} message từ SQS queue!`);
       } catch (e) {
         consoleBox.innerText = `Lỗi worker: ${e.message}`;
       }

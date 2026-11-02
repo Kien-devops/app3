@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 8080;
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || 'http://order-service:8080';
 const INVENTORY_SERVICE_URL = process.env.INVENTORY_SERVICE_URL || 'http://inventory-service:8080';
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:8080';
+const WORKER_SERVICE_URL = process.env.WORKER_SERVICE_URL || 'http://payment-worker:8080';
 
 function proxyRequest(targetBaseUrl, req, res) {
   const targetUrl = new URL(req.url, targetBaseUrl);
@@ -65,6 +66,10 @@ const server = http.createServer((req, res) => {
 
   if (pathname.startsWith('/api/auth')) {
     return proxyRequest(AUTH_SERVICE_URL, req, res);
+  }
+
+  if (pathname.startsWith('/api/worker')) {
+    return proxyRequest(WORKER_SERVICE_URL, req, res);
   }
 
   // Serve static UI
