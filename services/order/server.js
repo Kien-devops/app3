@@ -24,7 +24,7 @@ try {
       database: DB_NAME,
       user: DB_USER,
       password: DB_PASSWORD,
-      ssl: false,
+      ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 10000
     });
