@@ -1,0 +1,10 @@
+{
+  "name": "payment-worker",
+  "version": "1.0.0",
+  "description": "ReliabilityShop Asynchronous SQS Payment Consumer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

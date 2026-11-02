@@ -1,0 +1,9 @@
+{
+  "name": "reliability-shop-monorepo",
+  "version": "1.0.0",
+  "description": "AWS Cloud-Native SRE Microservices Platform",
+  "private": true,
+  "scripts": {
+    "test": "node --test services/auth/test.js"
+  }
+}

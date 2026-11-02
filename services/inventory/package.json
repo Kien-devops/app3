@@ -1,0 +1,10 @@
+{
+  "name": "inventory-service",
+  "version": "1.0.0",
+  "description": "ReliabilityShop Inventory Microservice",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

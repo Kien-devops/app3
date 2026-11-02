@@ -1,0 +1,10 @@
+{
+  "name": "reliability-shop-frontend",
+  "version": "1.0.0",
+  "description": "ReliabilityShop Frontend & SRE Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

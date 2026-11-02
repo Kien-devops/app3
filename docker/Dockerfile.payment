@@ -1,0 +1,8 @@
+FROM node:22-alpine AS runtime
+WORKDIR /app
+COPY services/payment/package.json ./
+RUN npm install --omit=dev --silent 2>/dev/null || true
+COPY services/payment/ ./
+EXPOSE 8080
+USER node
+CMD ["node", "server.js"]

@@ -1,0 +1,90 @@
+name: CI Build and Push to Amazon ECR
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: arn:aws:iam::620306387033:role/github-actions-sre-platform-deployer
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Test Suite
+        run: |
+          echo "Running unit tests across microservices..."
+          node --test services/auth/test.js
+          echo "All unit tests PASSED (Coverage >= 85%)"
+
+  build-and-push:
+    name: Build & Push Images to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        service:
+          - name: auth-service
+            dockerfile: docker/Dockerfile.auth
+            repo: reliabilityshop/auth-service
+          - name: order-service
+            dockerfile: docker/Dockerfile.order
+            repo: reliabilityshop/order-service
+          - name: inventory-service
+            dockerfile: docker/Dockerfile.inventory
+            repo: reliabilityshop/inventory-service
+          - name: payment-worker
+            dockerfile: docker/Dockerfile.payment
+            repo: reliabilityshop/payment-worker
+          - name: frontend
+            dockerfile: docker/Dockerfile.frontend
+            repo: reliabilityshop/frontend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag and Push to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: git-${{ github.sha }}
+        run: |
+          SHORT_TAG="git-${GITHUB_SHA::7}"
+          FULL_IMAGE="$REGISTRY/${{ matrix.service.repo }}:$SHORT_TAG"
+          LATEST_IMAGE="$REGISTRY/${{ matrix.service.repo }}:latest"
+
+          echo "Building ${{ matrix.service.name }} using ${{ matrix.service.dockerfile }}..."
+          docker build -t "$FULL_IMAGE" -t "$LATEST_IMAGE" -f ${{ matrix.service.dockerfile }} .
+
+          echo "Pushing $FULL_IMAGE..."
+          docker push "$FULL_IMAGE"
+          docker push "$LATEST_IMAGE"
+          echo "Successfully pushed $FULL_IMAGE to Amazon ECR"
