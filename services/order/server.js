@@ -117,6 +117,18 @@ const server = http.createServer(async (req, res) => {
     try {
       const client = await pgPool.connect();
       try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS orders (
+            id VARCHAR(64) PRIMARY KEY,
+            item VARCHAR(255) NOT NULL,
+            quantity INT NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            customer VARCHAR(255),
+            status VARCHAR(64),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        pgStatus = { connected: true, error: null, lastChecked: new Date().toISOString() };
         const result = await client.query(`
           SELECT 
             NOW() as server_time,
