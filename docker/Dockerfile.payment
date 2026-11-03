@@ -1,7 +1,7 @@
 FROM node:22-alpine AS runtime
 WORKDIR /app
 COPY services/payment/package.json services/payment/package-lock.json ./
-RUN npm ci --omit=dev --silent
+RUN npm ci --omit=dev --silent && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
 COPY services/payment/ ./
 COPY certs/ap-southeast-1-bundle.pem /app/certs/ap-southeast-1-bundle.pem
 ENV DB_SSL_CA_FILE=/app/certs/ap-southeast-1-bundle.pem
