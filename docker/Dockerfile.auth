@@ -1,7 +1,7 @@
 FROM node:22-alpine AS runtime
 WORKDIR /app
-COPY services/auth/package.json ./
-RUN npm install --omit=dev --silent 2>/dev/null || true
+COPY services/auth/package.json services/auth/package-lock.json ./
+RUN npm ci --omit=dev --silent
 COPY services/auth/ ./
 EXPOSE 8080
 USER node

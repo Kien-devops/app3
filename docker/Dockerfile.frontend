@@ -1,7 +1,7 @@
 FROM node:22-alpine AS runtime
 WORKDIR /app
-COPY frontend/package.json ./
-RUN npm install --omit=dev --silent 2>/dev/null || true
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --omit=dev --silent
 COPY frontend/ ./
 EXPOSE 8080
 USER node

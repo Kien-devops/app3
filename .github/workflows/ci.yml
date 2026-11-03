@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af6772620 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            services/order/package-lock.json
+            services/payment/package-lock.json
+            services/auth/package-lock.json
+            services/inventory/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: |
+          npm ci --prefix services/order
+          npm ci --prefix services/payment
+
+      - name: Run tests
+        run: |
+          node --test services/auth/test.js
+          npm test --prefix services/order
+          npm test --prefix services/payment
+          npm test --prefix frontend
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          while IFS= read -r file; do node --check "$file"; done < <(find frontend services -name '*.js' -type f -not -path '*/node_modules/*' | sort)

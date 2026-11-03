@@ -118,6 +118,17 @@
       animation: pulse 2s infinite;
     }
 
+    .status-dot.unknown {
+      background: #64748b;
+      box-shadow: none;
+      animation: none;
+    }
+
+    .status-dot.warning {
+      background: var(--warning);
+      box-shadow: 0 0 8px var(--warning);
+    }
+
     @keyframes pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.5; transform: scale(0.9); }
@@ -416,6 +427,54 @@
       color: #38bdf8;
     }
 
+    .journey-card {
+      margin-bottom: 1.5rem;
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(17, 24, 39, 0.95));
+    }
+
+    .journey-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .journey-step {
+      min-height: 92px;
+      padding: 0.9rem;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #0f172a;
+    }
+
+    .journey-step strong {
+      display: block;
+      color: #e2e8f0;
+      margin-bottom: 0.35rem;
+      font-size: 0.82rem;
+    }
+
+    .journey-step span {
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      overflow-wrap: anywhere;
+    }
+
+    .journey-step.success { border-color: rgba(16, 185, 129, 0.65); }
+    .journey-step.success span { color: #6ee7b7; }
+    .journey-step.warning { border-color: rgba(245, 158, 11, 0.65); }
+    .journey-step.warning span { color: #fcd34d; }
+    .journey-step.error { border-color: rgba(239, 68, 68, 0.65); }
+    .journey-step.error span { color: #fca5a5; }
+
+    @media (max-width: 760px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .journey-grid { grid-template-columns: 1fr; }
+      .hero-banner { padding: 1.25rem; }
+      main { padding-inline: 1rem; }
+    }
+
     /* Secret Key Item */
     .secret-row {
       display: flex;
@@ -480,24 +539,24 @@
 
       <div class="system-status-pills">
         <div class="status-pill" title="Amazon RDS PostgreSQL 16.9">
-          <span class="status-dot"></span>
+          <span class="status-dot unknown" id="dot-rds"></span>
           <span>RDS PostgreSQL:</span>
-          <span style="color: #10b981;" id="pill-rds-status">Active (Multi-AZ)</span>
+          <span style="color: #94a3b8;" id="pill-rds-status">UNKNOWN</span>
         </div>
         <div class="status-pill" title="AWS SQS Queue">
-          <span class="status-dot" style="background: #a855f7; box-shadow: 0 0 8px #a855f7;"></span>
+          <span class="status-dot unknown" id="dot-sqs"></span>
           <span>SQS Queue:</span>
-          <span style="color: #c084fc;" id="pill-sqs-status">Active & Polling</span>
+          <span style="color: #94a3b8;" id="pill-sqs-status">UNKNOWN</span>
         </div>
         <div class="status-pill" title="External Secrets Operator">
-          <span class="status-dot" style="background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></span>
+          <span class="status-dot unknown"></span>
           <span>ESO:</span>
-          <span style="color: #38bdf8;">Synced (AWS KMS)</span>
+          <span style="color: #94a3b8;" id="pill-eso-status">UNKNOWN</span>
         </div>
         <div class="status-pill" title="GitOps Argo CD Engine">
-          <span class="status-dot" style="background: #f59e0b; box-shadow: 0 0 8px #f59e0b;"></span>
+          <span class="status-dot unknown"></span>
           <span>GitOps:</span>
-          <span style="color: #fbbf24;">Argo CD Synced</span>
+          <span style="color: #94a3b8;" id="pill-gitops-status">UNKNOWN</span>
         </div>
       </div>
     </div>
@@ -519,29 +578,42 @@
       </div>
       <div>
         <button class="btn btn-primary" onclick="runComprehensiveDiagnostics()">
-          <span>⚡ Chạy Toàn Bộ Kiểm Thử (Full SRE Audit)</span>
+          <span>⚡ Kiểm tra Runtime Read-only</span>
         </button>
       </div>
     </div>
 
     <!-- Navigation Tabs -->
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('tab-storefront')">
+      <button class="tab-btn active" onclick="switchTab('tab-storefront', this)">
         <span>🛍️ Storefront & Đặt Hàng</span>
       </button>
-      <button class="tab-btn" onclick="switchTab('tab-diagnostics')">
+      <button class="tab-btn" onclick="switchTab('tab-diagnostics', this)">
         <span>🧪 Trung Tâm Kiểm Thử SRE (DB, Queue, Secrets)</span>
       </button>
-      <button class="tab-btn" onclick="switchTab('tab-orders')">
+      <button class="tab-btn" onclick="switchTab('tab-orders', this)">
         <span>📜 Sổ Cái Đơn Hàng (PostgreSQL Stream)</span>
       </button>
-      <button class="tab-btn" onclick="switchTab('tab-topology')">
+      <button class="tab-btn" onclick="switchTab('tab-topology', this)">
         <span>🌐 Kiến Trúc Multi-AZ & GitOps Pipeline</span>
       </button>
     </div>
 
     <!-- TAB 1: STOREFRONT -->
     <div id="tab-storefront" class="tab-content active">
+      <div class="card journey-card" aria-live="polite">
+        <div class="card-header">
+          <div class="card-title"><span>🔗</span><span>Luồng Order thực tế</span></div>
+          <span class="card-badge badge-warning" id="journey-status">WAITING</span>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted);">Theo dõi từng bước từ PostgreSQL commit đến SQS worker và Redis cache. Chỉ dữ liệu API thật mới đổi trạng thái.</p>
+        <div class="journey-grid">
+          <div class="journey-step" id="journey-db"><strong>1. RDS commit</strong><span>Chưa có order</span></div>
+          <div class="journey-step" id="journey-sqs"><strong>2. SQS event</strong><span>Chưa publish</span></div>
+          <div class="journey-step" id="journey-worker"><strong>3. Worker consume</strong><span>Chưa consume</span></div>
+          <div class="journey-step" id="journey-redis"><strong>4. Redis cache</strong><span>Chưa đọc cache</span></div>
+        </div>
+      </div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
         <div>
           <h3 style="font-size: 1.15rem; font-weight: 700; color: #fff;">Danh mục Sản phẩm SRE Platform</h3>
@@ -618,16 +690,16 @@
               <span>🐘</span>
               <span>Amazon RDS PostgreSQL Diagnostics</span>
             </div>
-            <span class="card-badge badge-success" id="badge-db-status">ONLINE (9ms)</span>
+            <span class="card-badge badge-warning" id="badge-db-status">UNKNOWN</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
             Kiểm tra kết nối trực tiếp từ Pods trong EKS sang Amazon RDS PostgreSQL thông qua AWS Secrets Manager giải mã bởi External Secrets Operator (ESO).
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-            <button class="btn btn-primary" onclick="testDatabase()">⚡ Ping & Query Live DB</button>
+            <button class="btn btn-primary" onclick="testDatabase()">⚡ Kiểm tra RDS (read-only)</button>
             <button class="btn btn-secondary" onclick="seedSampleOrders()">🌱 Seed 3 Orders</button>
           </div>
-          <div class="console-box" id="console-db">Nhấp vào "⚡ Ping & Query Live DB" để kiểm tra kết nối trực tiếp...</div>
+          <div class="console-box" id="console-db">Nhấp kiểm tra để đọc health runtime; thao tác không chạy DDL hoặc ghi dữ liệu.</div>
         </div>
 
         <!-- 2. Amazon ElastiCache Redis Test Box -->
@@ -637,16 +709,16 @@
               <span>⚡</span>
               <span>Amazon ElastiCache Redis (TLS + In-Memory Cache)</span>
             </div>
-            <span class="card-badge badge-primary" id="badge-redis-status">READY</span>
+            <span class="card-badge badge-warning" id="badge-redis-status">UNKNOWN</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Kiểm tra kết nối In-Memory Cache qua TLSv1.3 và xác thực token bí mật từ AWS Secrets Manager qua External Secrets Operator.
+            Kiểm tra cache-aside bằng hai lượt đọc orders. Không tạo test key hoặc thay đổi dữ liệu Redis.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-            <button class="btn btn-primary" onclick="testRedis()">⚡ Ping & Test Real Redis Cache</button>
-            <button class="btn btn-secondary" onclick="loadOrders()">🔄 Test Cache-Aside Hit/Miss</button>
+            <button class="btn btn-primary" onclick="checkRedisStatus()">⚡ Kiểm tra Redis (read-only)</button>
+            <button class="btn btn-secondary" onclick="loadOrders()">🔄 Đọc orders (Cache-Aside)</button>
           </div>
-          <div class="console-box" id="console-redis">Nhấp vào "⚡ Ping & Test Real Redis Cache" để gửi lệnh PING, SET, GET qua TLS...</div>
+          <div class="console-box" id="console-redis">Nhấp kiểm tra để quan sát MISS/HIT/BYPASS từ API orders.</div>
         </div>
 
         <!-- 3. SQS Queue & Worker Test Box -->
@@ -656,16 +728,16 @@
               <span>📬</span>
               <span>Amazon SQS & Payment Worker Pipeline</span>
             </div>
-            <span class="card-badge badge-purple" id="badge-sqs-status">LONG POLLING</span>
+            <span class="card-badge badge-warning" id="badge-sqs-status">UNKNOWN</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Kiểm tra gửi thông điệp thật (real SDK SendMessage) vào queue <code style="color:#a855f7;">reliability-shop-dev-order-queue</code> và tiến trình tiêu thụ của worker.
+            Đọc trạng thái producer và worker. Message chỉ được tạo khi người dùng đặt order thật.
           </p>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-            <button class="btn btn-primary" onclick="dispatchSqsTest()">🚀 Gửi Real Message vào SQS</button>
-            <button class="btn btn-secondary" onclick="checkWorkerStatus()">📥 Xem Live Worker Logs</button>
+            <button class="btn btn-primary" onclick="checkQueueStatus()">📬 Kiểm tra SQS (read-only)</button>
+            <button class="btn btn-secondary" onclick="checkWorkerStatus()">📥 Xem worker stats</button>
           </div>
-          <div class="console-box" id="console-sqs">Nhấp vào "🚀 Gửi Real Message vào SQS" để kiểm tra hàng đợi thật...</div>
+          <div class="console-box" id="console-sqs">Nhấp kiểm tra để đọc worker state và message gần nhất.</div>
         </div>
 
         <!-- 3. External Secrets Operator Box -->
@@ -673,33 +745,33 @@
           <div class="card-header">
             <div class="card-title">
               <span>🔐</span>
-              <span>External Secrets Operator (ESO) Decrypted Vault</span>
+              <span>Runtime Credential Readiness</span>
             </div>
-            <span class="card-badge badge-primary">SYNCED (AES-256)</span>
+            <span class="card-badge badge-warning" id="badge-eso-status">UNKNOWN</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Các biến môi trường được giải mã tự động từ AWS Secrets Manager thông qua EKS Pod Identity mà không có bất kỳ plaintext nào trên Git.
+            UI chỉ xác minh dependency dùng được. Nguồn secret và trạng thái ESO phải được kiểm tra trong Argo CD/Kubernetes.
           </p>
           <div>
             <div class="secret-row">
               <span class="secret-key">DB_NAME</span>
-              <span class="secret-val" id="sec-dbname">reliability_shop</span>
+              <span class="secret-val" id="sec-dbname">NOT VERIFIED</span>
             </div>
             <div class="secret-row">
               <span class="secret-key">DB_USER</span>
-              <span class="secret-val" id="sec-dbuser">sre_admin</span>
+              <span class="secret-val" id="sec-dbuser">NOT VERIFIED</span>
             </div>
             <div class="secret-row">
               <span class="secret-key">DB_PASSWORD</span>
-              <span class="secret-val" style="color: #10b981;">●●●●●●●●●●●● (KMS Decrypted)</span>
+              <span class="secret-val">NOT VERIFIED</span>
             </div>
             <div class="secret-row">
               <span class="secret-key">JWT_SECRET</span>
-              <span class="secret-val" style="color: #10b981;">●●●●●●●●●●●● (Loaded via ESO)</span>
+              <span class="secret-val">NOT VERIFIED</span>
             </div>
             <div class="secret-row">
               <span class="secret-key">REDIS_AUTH</span>
-              <span class="secret-val" style="color: #10b981;">●●●●●●●●●●●● (ElastiCache Token)</span>
+              <span class="secret-val">NOT VERIFIED</span>
             </div>
           </div>
           <button class="btn btn-secondary" style="margin-top: 0.5rem; width: 100%;" onclick="verifySecrets()">
@@ -714,7 +786,7 @@
               <span>🌐</span>
               <span>Microservices Multi-AZ Status</span>
             </div>
-            <span class="card-badge badge-success">5/5 HEALTHY</span>
+            <span class="card-badge badge-warning" id="badge-services-status">UNKNOWN</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
             Tình trạng sống động (Liveness/Readiness probes) của 5 microservices phân bổ trên các Availability Zones:
@@ -734,31 +806,31 @@
                   <td><strong>frontend</strong></td>
                   <td>8080 (HTTP)</td>
                   <td><span class="hero-tag">ap-southeast-1a / 1b</span></td>
-                  <td><span style="color: #10b981; font-weight: 700;">● UP (200)</span></td>
+                  <td><span style="color: #94a3b8; font-weight: 700;" id="ms-frontend-status">● UNKNOWN</span></td>
                 </tr>
                 <tr>
                   <td><strong>order-service</strong></td>
                   <td>8080 (REST)</td>
                   <td><span class="hero-tag">ap-southeast-1a / 1b</span></td>
-                  <td><span style="color: #10b981; font-weight: 700;" id="ms-order-status">● UP (200)</span></td>
+                  <td><span style="color: #94a3b8; font-weight: 700;" id="ms-order-status">● UNKNOWN</span></td>
                 </tr>
                 <tr>
                   <td><strong>inventory-service</strong></td>
                   <td>8080 (REST)</td>
                   <td><span class="hero-tag">ap-southeast-1a / 1b</span></td>
-                  <td><span style="color: #10b981; font-weight: 700;">● UP (200)</span></td>
+                  <td><span style="color: #94a3b8; font-weight: 700;" id="ms-inventory-status">● UNKNOWN</span></td>
                 </tr>
                 <tr>
                   <td><strong>auth-service</strong></td>
                   <td>8080 (JWT)</td>
                   <td><span class="hero-tag">ap-southeast-1a / 1b</span></td>
-                  <td><span style="color: #10b981; font-weight: 700;">● UP (200)</span></td>
+                  <td><span style="color: #94a3b8; font-weight: 700;" id="ms-auth-status">● UNKNOWN</span></td>
                 </tr>
                 <tr>
                   <td><strong>payment-worker</strong></td>
                   <td>8080 (Queue)</td>
                   <td><span class="hero-tag">ap-southeast-1a</span></td>
-                  <td><span style="color: #10b981; font-weight: 700;">● POLLING</span></td>
+                  <td><span style="color: #94a3b8; font-weight: 700;" id="ms-worker-status">● UNKNOWN</span></td>
                 </tr>
               </tbody>
             </table>
@@ -813,7 +885,7 @@
               <span>🔄</span>
               <span>GitOps Pipeline Control Plane</span>
             </div>
-            <span class="card-badge badge-warning">ARGO CD v2.11.3</span>
+            <span class="card-badge badge-warning" id="badge-gitops-status">NOT VERIFIED</span>
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 1rem;">
             Hệ thống tuân thủ nguyên tắc **Git as Single Source of Truth**. Bất kỳ thay đổi cấu hình hạ tầng nào đẩy lên GitHub sẽ được Argo CD tự động hòa giải (Reconcile) và áp dụng vào EKS cluster:
@@ -825,7 +897,7 @@
 3. CI Engine: GitHub Actions OIDC AssumeRole -> Amazon ECR
 4. GitOps Engine: Argo CD Application (Target: gitops/applications/reliability-shop/base)
 5. Live State: Auto-Sync & Self-Heal ENABLED
-6. Status: Synced & Healthy</div>
+6. Status: Runtime evidence required</div>
           <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
             <a href="https://github.com/Kien-devops/app3/actions" target="_blank" class="btn btn-secondary" style="text-decoration: none;">
               🐙 Xem GitHub Actions CI Runs
@@ -842,27 +914,27 @@
               <span>🛡️</span>
               <span>SRE Reliability & Zero Trust Checklist</span>
             </div>
-            <span class="card-badge badge-success">COMPLIANT</span>
+            <span class="card-badge badge-warning">NOT VERIFIED</span>
           </div>
           <div class="secret-row">
             <span>TLS Encryption (ACM Certificate)</span>
-            <span style="color: #10b981; font-weight: 700;">✔ Active (*.dev.devopsss.site)</span>
+            <span style="color: #94a3b8; font-weight: 700;">? Runtime evidence required</span>
           </div>
           <div class="secret-row">
             <span>EKS Multi-AZ High Availability</span>
-            <span style="color: #10b981; font-weight: 700;">✔ 2 AZs (ap-southeast-1a, 1b)</span>
+            <span style="color: #94a3b8; font-weight: 700;">? Runtime evidence required</span>
           </div>
           <div class="secret-row">
             <span>Secrets at Rest & In-Transit</span>
-            <span style="color: #10b981; font-weight: 700;">✔ KMS Customer Managed Key</span>
+            <span style="color: #94a3b8; font-weight: 700;">? Runtime evidence required</span>
           </div>
           <div class="secret-row">
             <span>Database Network Isolation</span>
-            <span style="color: #10b981; font-weight: 700;">✔ Strictly Private Subnets Only</span>
+            <span style="color: #94a3b8; font-weight: 700;">? Runtime evidence required</span>
           </div>
           <div class="secret-row">
             <span>Pod Identity (IAM Least Privilege)</span>
-            <span style="color: #10b981; font-weight: 700;">✔ Zero Hardcoded AWS Keys</span>
+            <span style="color: #94a3b8; font-weight: 700;">? Runtime evidence required</span>
           </div>
         </div>
       </div>
@@ -873,188 +945,279 @@
   <div id="toast">Thông báo hệ thống</div>
 
   <script>
-    function showToast(msg, isSuccess = true) {
+    let lastOrderId = null;
+
+    function showToast(message, isSuccess = true) {
       const toast = document.getElementById('toast');
-      toast.innerText = msg;
+      toast.textContent = message;
       toast.style.borderLeftColor = isSuccess ? '#10b981' : '#ef4444';
       toast.classList.add('show');
-      setTimeout(() => { toast.classList.remove('show'); }, 3500);
+      setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      event.currentTarget.classList.add('active');
+    function switchTab(tabId, button) {
+      document.querySelectorAll('.tab-btn').forEach(item => item.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(item => item.classList.remove('active'));
+      if (button) button.classList.add('active');
       document.getElementById(tabId).classList.add('active');
       if (tabId === 'tab-orders') loadOrders();
     }
 
-    // Live Database Ping & Test
+    function setBadge(id, text, state = 'warning') {
+      const badge = document.getElementById(id);
+      if (!badge) return;
+      badge.textContent = text;
+      badge.className = `card-badge badge-${state === 'success' ? 'success' : 'warning'}`;
+    }
+
+    function setServiceStatus(id, ok, text) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.textContent = `● ${text}`;
+      element.style.color = ok ? '#10b981' : '#f59e0b';
+    }
+
+    function setJourneyStep(id, detail, state = '') {
+      const step = document.getElementById(id);
+      if (!step) return;
+      step.className = `journey-step${state ? ` ${state}` : ''}`;
+      step.querySelector('span').textContent = detail;
+    }
+
+    function renderTableMessage(message, isError = false) {
+      const tbody = document.getElementById('orders-tbody');
+      tbody.replaceChildren();
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 8;
+      cell.textContent = message;
+      cell.style.cssText = `text-align:center;color:${isError ? '#ef4444' : '#94a3b8'};padding:2rem;`;
+      row.appendChild(cell);
+      tbody.appendChild(row);
+    }
+
+    function appendTextCell(row, value, style = '') {
+      const cell = document.createElement('td');
+      cell.textContent = value == null ? '' : String(value);
+      if (style) cell.style.cssText = style;
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function renderOrders(orders, source) {
+      const tbody = document.getElementById('orders-tbody');
+      tbody.replaceChildren();
+      orders.forEach(order => {
+        const row = document.createElement('tr');
+        appendTextCell(row, order.id, 'color:#38bdf8;font-weight:700;font-family:JetBrains Mono,monospace;');
+        appendTextCell(row, order.item, 'font-weight:700;');
+        appendTextCell(row, order.quantity);
+        const amount = Number(order.amount);
+        appendTextCell(row, Number.isFinite(amount) ? `$${amount.toFixed(2)}` : 'N/A', 'color:#38bdf8;font-weight:700;');
+        appendTextCell(row, order.customer || 'N/A');
+        appendTextCell(row, order.status || 'UNKNOWN');
+        appendTextCell(row, source || 'UNKNOWN');
+        const created = new Date(order.createdAt);
+        appendTextCell(row, Number.isNaN(created.getTime()) ? 'N/A' : created.toLocaleTimeString(), 'font-size:0.75rem;color:#94a3b8;');
+        tbody.appendChild(row);
+      });
+    }
+
+    async function fetchJson(path, options) {
+      const response = await fetch(path, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+
+    function createIdempotencyKey() {
+      if (globalThis.crypto?.randomUUID) return `order-${globalThis.crypto.randomUUID()}`;
+      return `order-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+    }
+
+    async function checkSystemHealth() {
+      const data = await fetchJson('/api/system/health');
+      const services = data.services || {};
+      const order = services.order || {};
+      const worker = services.worker || {};
+      const workerPolling = worker.workerState === 'POLLING';
+
+      setServiceStatus('ms-frontend-status', services.frontend?.ok, services.frontend?.ok ? 'UP' : 'UNKNOWN');
+      setServiceStatus('ms-order-status', order.ok, order.ok ? 'UP' : 'UNAVAILABLE');
+      setServiceStatus('ms-inventory-status', services.inventory?.ok, services.inventory?.ok ? 'UP' : 'UNAVAILABLE');
+      setServiceStatus('ms-auth-status', services.auth?.ok, services.auth?.ok ? 'UP' : 'UNAVAILABLE');
+      setServiceStatus('ms-worker-status', workerPolling, worker.workerState || 'UNAVAILABLE');
+
+      const healthyCount = Object.values(services).filter(service => service?.ok).length;
+      setBadge('badge-services-status', `${healthyCount}/5 HEALTHY`, healthyCount === 5 ? 'success' : 'warning');
+      setBadge('badge-db-status', order.dbConnected ? 'CONNECTED' : 'UNAVAILABLE', order.dbConnected ? 'success' : 'warning');
+      setBadge('badge-redis-status', order.redisConnected ? 'CONNECTED' : 'BYPASS', order.redisConnected ? 'success' : 'warning');
+      setBadge('badge-sqs-status', order.sqsConfigured && workerPolling ? 'POLLING' : 'UNVERIFIED', order.sqsConfigured && workerPolling ? 'success' : 'warning');
+
+      document.getElementById('pill-rds-status').textContent = order.dbConnected ? 'CONNECTED' : 'UNAVAILABLE';
+      document.getElementById('pill-rds-status').style.color = order.dbConnected ? '#10b981' : '#f59e0b';
+      document.getElementById('pill-sqs-status').textContent = order.sqsConfigured && workerPolling ? 'POLLING' : 'UNVERIFIED';
+      document.getElementById('pill-sqs-status').style.color = order.sqsConfigured && workerPolling ? '#c084fc' : '#f59e0b';
+      document.getElementById('dot-rds').className = `status-dot ${order.dbConnected ? '' : 'warning'}`;
+      document.getElementById('dot-sqs').className = `status-dot ${order.sqsConfigured && workerPolling ? '' : 'warning'}`;
+      return data;
+    }
+
     async function testDatabase() {
       const consoleBox = document.getElementById('console-db');
-      consoleBox.innerText = 'Connecting to Amazon RDS PostgreSQL via encrypted TLS...\nExecuting diagnostic queries...';
+      consoleBox.textContent = 'Đang đọc health của order-service; không chạy DDL hoặc ghi dữ liệu...';
       try {
-        const res = await fetch('/api/orders/db-test');
-        const data = await res.json();
-        consoleBox.innerText = JSON.stringify(data, null, 2);
-        if (data.dbConnected) {
-          document.getElementById('badge-db-status').innerText = `ONLINE (${data.latencyMs}ms)`;
-          document.getElementById('badge-db-status').className = 'card-badge badge-success';
-          document.getElementById('pill-rds-status').innerText = `Healthy (${data.latencyMs}ms)`;
-          showToast(`✔ Kết nối PostgreSQL thành công! Độ trễ: ${data.latencyMs}ms`);
-        } else {
-          document.getElementById('badge-db-status').innerText = 'ERROR';
-          document.getElementById('badge-db-status').className = 'card-badge badge-warning';
-          showToast(`Chưa kết nối được DB: ${data.error}`, false);
-        }
-      } catch (e) {
-        consoleBox.innerText = `Lỗi mạng: ${e.message}`;
-        showToast('Lỗi gửi request kiểm tra DB', false);
+        const health = await checkSystemHealth();
+        const order = health.services?.order || {};
+        consoleBox.textContent = JSON.stringify({ checkedAt: health.checkedAt, connected: order.dbConnected, service: order.status }, null, 2);
+        showToast(order.dbConnected ? 'RDS connection đang hoạt động' : 'RDS chưa sẵn sàng', order.dbConnected);
+      } catch (error) {
+        consoleBox.textContent = `Không đọc được runtime health: ${error.message}`;
+        showToast('Không kiểm tra được RDS', false);
       }
     }
 
-    // Place SRE Order
-    async function placeOrder(itemName = 'SRE Cloud-Native Package', itemAmount = 99.00) {
-      showToast(`Đang tạo đơn hàng [${itemName}]...`);
+    async function placeOrder(itemName = 'SRE Cloud-Native Package', itemAmount = 99) {
+      const idempotencyKey = createIdempotencyKey();
+      showToast(`Đang tạo order: ${itemName}`);
+      setJourneyStep('journey-db', 'Đang commit...', 'warning');
+      setJourneyStep('journey-sqs', 'Đang chờ outbox...', 'warning');
+      setJourneyStep('journey-worker', 'Chưa consume');
       try {
-        const res = await fetch('/api/orders', {
+        const data = await fetchJson('/api/orders', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            item: itemName,
-            amount: itemAmount,
-            quantity: 1,
-            customer: 'Senior Platform Architect'
-          })
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey
+          },
+          body: JSON.stringify({ item: itemName, amount: itemAmount, quantity: 1, customer: 'Senior Platform Architect' })
         });
-        const data = await res.json();
-        if (data.success) {
-          showToast(`✔ Đơn hàng ${data.order.id} đã lưu vào PostgreSQL và gửi SQS!`);
-          loadOrders();
-        } else {
-          showToast('Lỗi đặt hàng', false);
-        }
-      } catch (e) {
-        showToast(`Lỗi: ${e.message}`, false);
+        if (!data.success || !data.order) throw new Error(data.error || 'Order API rejected request');
+
+        lastOrderId = data.order.id;
+        setJourneyStep('journey-db', `${data.order.id} • ${data.storage || 'COMMITTED'}`, 'success');
+        const outboxStatus = data.outbox?.status || (data.sqs?.published || data.sqs?.dispatched ? 'PUBLISHED' : 'PENDING');
+        setJourneyStep('journey-sqs', `${outboxStatus}${data.outbox?.eventId ? ` • ${data.outbox.eventId}` : ''}`, outboxStatus === 'PUBLISHED' ? 'success' : 'warning');
+        setBadge('journey-status', 'IN PROGRESS', 'warning');
+        showToast(`Order ${data.order.id} đã commit; đang chờ async worker`);
+        await loadOrders();
+        setTimeout(checkWorkerStatus, 1500);
+        setTimeout(checkWorkerStatus, 4000);
+      } catch (error) {
+        setJourneyStep('journey-db', error.message, 'error');
+        setJourneyStep('journey-sqs', 'Không publish', 'error');
+        setBadge('journey-status', 'FAILED', 'warning');
+        showToast(`Đặt hàng lỗi: ${error.message}`, false);
       }
     }
 
-    // Seed Sample Orders
     async function seedSampleOrders() {
-      showToast('Đang seed 3 đơn hàng mẫu vào PostgreSQL...');
-      await placeOrder('Kubernetes Multi-AZ Node Pod', 149.00);
-      await placeOrder('Amazon RDS PostgreSQL gp3', 99.00);
-      await placeOrder('Amazon SQS Event Pipe', 49.00);
-      loadOrders();
+      const approved = window.confirm('Thao tác này tạo 3 order thật trong RDS/SQS. Tiếp tục?');
+      if (!approved) return;
+      for (const [item, amount] of [['Kubernetes Multi-AZ Node Pod', 149], ['Amazon RDS PostgreSQL gp3', 99], ['Amazon SQS Event Pipe', 49]]) {
+        await placeOrder(item, amount);
+      }
     }
 
-    // Load Orders from PostgreSQL
     async function loadOrders() {
-      const tbody = document.getElementById('orders-tbody');
       try {
-        const res = await fetch('/api/orders');
-        const data = await res.json();
-        if (data.success && data.orders && data.orders.length > 0) {
-          tbody.innerHTML = data.orders.map(o => `
-            <tr>
-              <td><code style="color: #38bdf8; font-weight: bold;">${o.id}</code></td>
-              <td><strong>${o.item}</strong></td>
-              <td>${o.quantity}</td>
-              <td style="color: #38bdf8; font-weight: bold;">$${parseFloat(o.amount).toFixed(2)}</td>
-              <td>${o.customer || 'SRE Architect'}</td>
-              <td><span class="card-badge badge-success">${o.status}</span></td>
-              <td><span class="card-badge badge-primary">${data.source || 'POSTGRESQL_RDS'}</span></td>
-              <td style="font-size: 0.75rem; color: #94a3b8;">${new Date(o.createdAt).toLocaleTimeString()}</td>
-            </tr>
-          `).join('');
-        } else {
-          tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #94a3b8; padding: 2rem;">Chưa có đơn hàng nào trong database. Hãy nhấp "Seed 3 Đơn Hàng Mẫu" ở trên!</td></tr>`;
+        const data = await fetchJson('/api/orders');
+        const orders = Array.isArray(data.orders) ? data.orders : [];
+        if (orders.length) renderOrders(orders, data.source || 'UNKNOWN');
+        else renderTableMessage('Chưa có order được trả về từ API.');
+
+        const cacheStatus = data.cacheStatus || (data.cached ? 'HIT' : data.source?.includes('POSTGRESQL') ? 'MISS' : 'BYPASS');
+        setJourneyStep('journey-redis', `${cacheStatus} • ${data.source || 'UNKNOWN'}`, cacheStatus === 'HIT' ? 'success' : 'warning');
+        setBadge('badge-redis-status', cacheStatus, cacheStatus === 'HIT' ? 'success' : 'warning');
+
+        if (lastOrderId) {
+          const order = orders.find(item => item.id === lastOrderId);
+          if (order?.status && order.status !== 'PENDING_PAYMENT') {
+            setJourneyStep('journey-worker', `${order.status} • ${lastOrderId}`, 'success');
+            setBadge('journey-status', 'COMPLETED', 'success');
+          }
         }
-      } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #ef4444; padding: 2rem;">Lỗi tải đơn hàng: ${e.message}</td></tr>`;
+        return data;
+      } catch (error) {
+        renderTableMessage(`Lỗi tải order: ${error.message}`, true);
+        setJourneyStep('journey-redis', `ERROR • ${error.message}`, 'error');
+        return null;
       }
     }
 
-    // Live Redis Ping & Test
-    async function testRedis() {
+    async function checkRedisStatus() {
       const consoleBox = document.getElementById('console-redis');
-      consoleBox.innerText = 'Connecting to Amazon ElastiCache Redis over TLS...\nExecuting PING, SET, GET test keys...';
+      consoleBox.textContent = 'Đang đọc /api/orders hai lần; không SET test key...';
       try {
-        const res = await fetch('/api/orders/redis-test');
-        const data = await res.json();
-        consoleBox.innerText = JSON.stringify(data, null, 2);
-        if (data.redisConnected) {
-          document.getElementById('badge-redis-status').innerText = `ONLINE (${data.latencyMs}ms)`;
-          document.getElementById('badge-redis-status').className = 'card-badge badge-success';
-          showToast(`✔ Kết nối ElastiCache Redis thành công! (${data.latencyMs}ms)`);
-        } else {
-          document.getElementById('badge-redis-status').innerText = 'ERROR';
-          document.getElementById('badge-redis-status').className = 'card-badge badge-warning';
-          showToast(`Lỗi Redis: ${data.error}`, false);
-        }
-      } catch (e) {
-        consoleBox.innerText = `Lỗi mạng Redis: ${e.message}`;
-        showToast('Lỗi gửi request Redis', false);
+        const first = await fetchJson('/api/orders');
+        const second = await fetchJson('/api/orders');
+        const result = {
+          firstRead: first.cacheStatus || (first.cached ? 'HIT' : 'MISS/BYPASS'),
+          secondRead: second.cacheStatus || (second.cached ? 'HIT' : 'MISS/BYPASS'),
+          source: second.source || 'UNKNOWN'
+        };
+        consoleBox.textContent = JSON.stringify(result, null, 2);
+        setJourneyStep('journey-redis', `${result.firstRead} → ${result.secondRead}`, result.secondRead === 'HIT' ? 'success' : 'warning');
+        showToast(`Redis cache-aside: ${result.firstRead} → ${result.secondRead}`, result.secondRead === 'HIT');
+      } catch (error) {
+        consoleBox.textContent = `Không kiểm tra được cache: ${error.message}`;
+        showToast('Không kiểm tra được Redis', false);
       }
     }
 
-    // SQS Test Dispatch
-    async function dispatchSqsTest() {
+    async function checkQueueStatus() {
       const consoleBox = document.getElementById('console-sqs');
-      consoleBox.innerText = 'Calling AWS SDK SendMessageCommand to Amazon SQS...\nQueue: reliability-shop-dev-order-queue...';
+      consoleBox.textContent = 'Đang đọc cấu hình producer và worker stats; không gửi test message...';
       try {
-        const res = await fetch('/api/orders/sqs-test');
-        const data = await res.json();
-        consoleBox.innerText = JSON.stringify(data, null, 2);
-        if (data.sqsDispatched) {
-          showToast(`✔ SQS Message Sent! MessageId: ${data.messageId.slice(0, 8)}...`);
-          setTimeout(checkWorkerStatus, 2000);
-        } else {
-          showToast(`SQS warning: ${data.error || 'Failed'}`, false);
-        }
-      } catch (e) {
-        consoleBox.innerText = `Lỗi SQS dispatch: ${e.message}`;
+        const health = await checkSystemHealth();
+        const order = health.services?.order || {};
+        const worker = health.services?.worker || {};
+        consoleBox.textContent = JSON.stringify({ producerConfigured: order.sqsConfigured, workerState: worker.workerState, processed: worker.messagesProcessed, lastProcessed: worker.lastProcessed }, null, 2);
+        showToast(order.sqsConfigured && worker.workerState === 'POLLING' ? 'SQS producer/worker đã sẵn sàng' : 'SQS chưa được xác minh', order.sqsConfigured && worker.workerState === 'POLLING');
+      } catch (error) {
+        consoleBox.textContent = `Không kiểm tra được SQS: ${error.message}`;
+        showToast('Không kiểm tra được SQS', false);
       }
     }
 
-    // Worker Status & Live Consumer Logs
     async function checkWorkerStatus() {
       const consoleBox = document.getElementById('console-sqs');
-      consoleBox.innerText = 'Fetching live payment-worker SQS consumer logs...';
       try {
-        const res = await fetch('/api/worker/stats');
-        const data = await res.json();
-        consoleBox.innerText = JSON.stringify(data, null, 2);
-        showToast(`✔ Worker đã xử lý ${data.messagesProcessed} message từ SQS queue!`);
-      } catch (e) {
-        consoleBox.innerText = `Lỗi worker: ${e.message}`;
+        const data = await fetchJson('/api/worker/stats');
+        consoleBox.textContent = JSON.stringify({ isPolling: data.isPolling, messagesProcessed: data.messagesProcessed, lastProcessed: data.lastProcessed, timestamp: data.timestamp }, null, 2);
+        if (data.lastProcessed?.orderId && (!lastOrderId || data.lastProcessed.orderId === lastOrderId)) {
+          setJourneyStep('journey-worker', `${data.lastProcessed.orderId} • CONSUMED`, 'success');
+          await loadOrders();
+        }
+        showToast(`Worker processed: ${data.messagesProcessed ?? 'UNKNOWN'}`, data.isPolling === true);
+      } catch (error) {
+        consoleBox.textContent = `Không đọc được worker stats: ${error.message}`;
+        showToast('Worker chưa sẵn sàng', false);
       }
     }
 
-    // Verify Secrets
     async function verifySecrets() {
-      showToast('Đang kiểm tra External Secrets Operator mapping...');
       try {
-        const res = await fetch('/api/orders/secrets-info');
-        const data = await res.json();
-        showToast('✔ 100% Bí mật đã được xác thực an toàn qua AWS Secrets Manager!');
-      } catch (e) {
-        showToast('Đã xác thực bí mật', true);
+        const health = await checkSystemHealth();
+        const runtimeReady = health.services?.order?.dbConnected && health.services?.order?.redisConnected;
+        setBadge('badge-eso-status', runtimeReady ? 'RUNTIME READY' : 'NOT VERIFIED', runtimeReady ? 'success' : 'warning');
+        document.getElementById('pill-eso-status').textContent = runtimeReady ? 'RUNTIME READY' : 'NOT VERIFIED';
+        showToast(runtimeReady ? 'Runtime credentials đang dùng được; nguồn ESO cần kiểm tra trong Argo/Kubernetes' : 'Chưa xác minh runtime credentials', runtimeReady);
+      } catch (error) {
+        showToast(`Không xác minh được runtime credentials: ${error.message}`, false);
       }
     }
 
-    // Run Comprehensive Diagnostics
     async function runComprehensiveDiagnostics() {
-      showToast('⚡ Bắt đầu Full SRE Audit trên toàn hệ thống...');
-      switchTab('tab-diagnostics');
-      await testDatabase();
-      await dispatchSqsTest();
-      await loadOrders();
-      showToast('🎉 Toàn bộ hệ thống Multi-AZ, RDS, SQS, ESO, GitOps đạt chuẩn SRE 100%!');
+      const diagnosticsButton = [...document.querySelectorAll('.tab-btn')].find(button => button.textContent.includes('Trung Tâm'));
+      switchTab('tab-diagnostics', diagnosticsButton);
+      showToast('Đang chạy kiểm tra read-only...');
+      const results = await Promise.allSettled([checkSystemHealth(), loadOrders(), checkQueueStatus()]);
+      const passed = results.filter(result => result.status === 'fulfilled').length;
+      showToast(`Kiểm tra read-only hoàn tất: ${passed}/${results.length} bước phản hồi`, passed === results.length);
     }
 
-    // Initial load
-    testDatabase();
+    checkSystemHealth().catch(() => {});
     loadOrders();
   </script>
 </body>

@@ -1,90 +1,127 @@
-name: CI Build and Push to Amazon ECR
+name: Build, Scan, and Push ECR Images
 
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
+  id-token: write
+
+concurrency:
+  group: app3-ecr-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   AWS_REGION: ap-southeast-1
-  AWS_ROLE_ARN: arn:aws:iam::620306387033:role/github-actions-sre-platform-deployer
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::620306387033:role/github-actions-sre-platform-deployer' }}
 
 jobs:
   test:
-    name: Run Unit Tests
+    uses: ./.github/workflows/ci.yml
+
+  security:
+    uses: ./.github/workflows/security-scan.yml
+
+  build-scan-push:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, security]
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Run Test Suite
-        run: |
-          echo "Running unit tests across microservices..."
-          node --test services/auth/test.js
-          echo "All unit tests PASSED (Coverage >= 85%)"
-
-  build-and-push:
-    name: Build & Push Images to ECR
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    permissions:
-      id-token: write
-      contents: read
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         service:
           - name: auth-service
             dockerfile: docker/Dockerfile.auth
-            repo: reliabilityshop/auth-service
+            repository: reliabilityshop/auth-service
           - name: order-service
             dockerfile: docker/Dockerfile.order
-            repo: reliabilityshop/order-service
+            repository: reliabilityshop/order-service
           - name: inventory-service
             dockerfile: docker/Dockerfile.inventory
-            repo: reliabilityshop/inventory-service
+            repository: reliabilityshop/inventory-service
           - name: payment-worker
             dockerfile: docker/Dockerfile.payment
-            repo: reliabilityshop/payment-worker
+            repository: reliabilityshop/payment-worker
           - name: frontend
             dockerfile: docker/Dockerfile.frontend
-            repo: reliabilityshop/frontend
+            repository: reliabilityshop/frontend
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Require deployment role
+        shell: bash
+        run: test -n "$AWS_ROLE_ARN" || { echo 'Repository variable AWS_ROLE_ARN is required'; exit 1; }
 
-      - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af6772620 # v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
       - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
 
-      - name: Build, Tag and Push to ECR
+      - name: Prepare immutable image
+        id: image
         env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ matrix.service.repository }}
+        shell: bash
         run: |
-          SHORT_TAG="git-${GITHUB_SHA::7}"
-          FULL_IMAGE="$REGISTRY/${{ matrix.service.repo }}:$SHORT_TAG"
+          IMAGE="$REGISTRY/$REPOSITORY:git-$GITHUB_SHA"
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=git-$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text 2>/dev/null || true)
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "ref=$IMAGE" >> "$GITHUB_OUTPUT"
+          if [[ "$DIGEST" == sha256:* ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            docker pull "$IMAGE"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          echo "Building ${{ matrix.service.name }} using ${{ matrix.service.dockerfile }}..."
-          docker build -t "$FULL_IMAGE" -f ${{ matrix.service.dockerfile }} .
+      - name: Build immutable image
+        if: steps.image.outputs.exists == 'false'
+        shell: bash
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --tag "$IMAGE" \
+            --file "${{ matrix.service.dockerfile }}" .
 
-          echo "Pushing $FULL_IMAGE..."
-          docker push "$FULL_IMAGE"
-          echo "Successfully pushed $FULL_IMAGE to Amazon ECR"
+      - name: Scan image
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Push immutable image
+        if: steps.image.outputs.exists == 'false'
+        shell: bash
+        run: docker push "$IMAGE"
+
+      - name: Record ECR digest
+        env:
+          REPOSITORY: ${{ matrix.service.repository }}
+        shell: bash
+        run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=git-$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          test "$DIGEST" != "None"
+          echo "- $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"

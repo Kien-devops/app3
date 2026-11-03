@@ -1,8 +1,10 @@
 FROM node:22-alpine AS runtime
 WORKDIR /app
-COPY services/order/package.json ./
-RUN npm install --omit=dev --silent
+COPY services/order/package.json services/order/package-lock.json ./
+RUN npm ci --omit=dev --silent
 COPY services/order/ ./
+COPY certs/ap-southeast-1-bundle.pem /app/certs/ap-southeast-1-bundle.pem
+ENV DB_SSL_CA_FILE=/app/certs/ap-southeast-1-bundle.pem
 EXPOSE 8080
 USER node
 CMD ["node", "server.js"]

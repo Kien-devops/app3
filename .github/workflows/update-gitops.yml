@@ -1,0 +1,125 @@
+name: Open GitOps Image Digest PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_commit:
+        description: Full 40-character App3 commit SHA already published to ECR
+        required: true
+        type: string
+      services:
+        description: Comma-separated service names to promote (frontend,order-service,payment-worker,auth-service,inventory-service)
+        required: true
+        default: frontend
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-southeast-1
+  AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN || 'arn:aws:iam::620306387033:role/github-actions-sre-platform-deployer' }}
+  PLATFORM_REPOSITORY: Kien-devops/aws-cloud-native-sre-platform
+
+jobs:
+  open-pr:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate inputs and configuration
+        env:
+          APP_COMMIT: ${{ inputs.app_commit }}
+          SERVICES: ${{ inputs.services }}
+          GITOPS_REPO_TOKEN: ${{ secrets.GITOPS_REPO_TOKEN }}
+        shell: bash
+        run: |
+          [[ "$APP_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo 'app_commit must be a full lowercase Git SHA'; exit 1; }
+          test -n "$AWS_ROLE_ARN" || { echo 'Repository variable AWS_ROLE_ARN is required'; exit 1; }
+          test -n "$GITOPS_REPO_TOKEN" || { echo 'Repository secret GITOPS_REPO_TOKEN is required'; exit 1; }
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Checkout platform repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af6772620 # v4
+        with:
+          repository: ${{ env.PLATFORM_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.GITOPS_REPO_TOKEN }}
+          path: platform
+
+      - name: Resolve ECR digests and update GitOps base
+        env:
+          APP_COMMIT: ${{ inputs.app_commit }}
+          SERVICES: ${{ inputs.services }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          commit = os.environ['APP_COMMIT']
+          requested = [item.strip() for item in os.environ['SERVICES'].split(',') if item.strip()]
+          allowed = {
+              'frontend': 'reliabilityshop/frontend',
+              'order-service': 'reliabilityshop/order-service',
+              'inventory-service': 'reliabilityshop/inventory-service',
+              'auth-service': 'reliabilityshop/auth-service',
+              'payment-worker': 'reliabilityshop/payment-worker',
+          }
+          if not requested or any(item not in allowed for item in requested):
+              raise SystemExit('services must contain only frontend, order-service, inventory-service, auth-service, payment-worker')
+          repositories = [allowed[item] for item in requested]
+          path = pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml')
+          source = path.read_text(encoding='utf-8')
+          for repository in repositories:
+              digest = subprocess.check_output([
+                  'aws', 'ecr', 'describe-images',
+                  '--repository-name', repository,
+                  '--image-ids', f'imageTag=git-{commit}',
+                  '--query', 'imageDetails[0].imageDigest',
+                  '--output', 'text',
+              ], text=True).strip()
+              if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+                  raise SystemExit(f'No valid digest found for {repository}:git-{commit}')
+              pattern = rf'(  - name: {re.escape(repository)}\n    newName: [^\n]+\n    digest: )sha256:[0-9a-f]{{64}}'
+              source, count = re.subn(pattern, rf'\g<1>{digest}', source)
+              if count != 1:
+                  raise SystemExit(f'Expected one image entry for {repository}, found {count}')
+          path.write_text(source, encoding='utf-8', newline='\n')
+          PY
+
+      - name: Commit branch and open pull request
+        env:
+          APP_COMMIT: ${{ inputs.app_commit }}
+          SERVICES: ${{ inputs.services }}
+          GH_TOKEN: ${{ secrets.GITOPS_REPO_TOKEN }}
+        working-directory: platform
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'GitOps already references these image digests.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          SHORT_SHA=${APP_COMMIT:0:12}
+          BRANCH="gitops/app3-$SHORT_SHA-$GITHUB_RUN_ID"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -b "$BRANCH"
+          git add gitops/applications/reliability-shop/base/kustomization.yaml
+          git commit -m "deploy(app3): promote $SHORT_SHA image digests"
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo "$PLATFORM_REPOSITORY" \
+            --base main \
+            --head "$BRANCH" \
+            --title "deploy(app3): promote $SHORT_SHA image digests" \
+            --body "Promotes $SERVICES App3 image(s) built from commit $APP_COMMIT by immutable ECR digest. Merge lets Argo CD reconcile reviewed desired state; this workflow does not call kubectl."

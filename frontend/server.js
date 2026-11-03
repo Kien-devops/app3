@@ -9,6 +9,27 @@ const INVENTORY_SERVICE_URL = process.env.INVENTORY_SERVICE_URL || 'http://inven
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:8080';
 const WORKER_SERVICE_URL = process.env.WORKER_SERVICE_URL || 'http://payment-worker:8080';
 
+function getJson(targetBaseUrl, pathname) {
+  return new Promise(resolve => {
+    const targetUrl = new URL(pathname, targetBaseUrl);
+    const request = http.get(targetUrl, { timeout: 3000 }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        try {
+          resolve({ ok: response.statusCode >= 200 && response.statusCode < 300, data: JSON.parse(body) });
+        } catch (_error) {
+          resolve({ ok: false, error: 'Invalid JSON response' });
+        }
+      });
+    });
+
+    request.on('timeout', () => request.destroy(new Error('Request timeout')));
+    request.on('error', error => resolve({ ok: false, error: error.message }));
+  });
+}
+
 function proxyRequest(targetBaseUrl, req, res) {
   const targetUrl = new URL(req.url, targetBaseUrl);
   const options = {
@@ -34,7 +55,7 @@ function proxyRequest(targetBaseUrl, req, res) {
   req.pipe(proxyReq, { end: true });
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   const { pathname } = parsed;
 
@@ -53,6 +74,44 @@ const server = http.createServer((req, res) => {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ status: 'READY', service: 'frontend' }));
+  }
+
+  if (pathname === '/api/system/health' && req.method === 'GET') {
+    const [order, inventory, auth, worker] = await Promise.all([
+      getJson(ORDER_SERVICE_URL, '/api/orders/status'),
+      getJson(INVENTORY_SERVICE_URL, '/health'),
+      getJson(AUTH_SERVICE_URL, '/health'),
+      getJson(WORKER_SERVICE_URL, '/api/worker/stats')
+    ]);
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({
+      checkedAt: new Date().toISOString(),
+      services: {
+        frontend: { ok: true, status: 'UP' },
+        order: {
+          ok: order.ok,
+          status: order.ok ? 'UP' : 'UNKNOWN',
+          dbConnected: order.data?.db?.connected === true,
+          redisConnected: order.data?.redis?.connected === true,
+          sqsConfigured: order.data?.sqs?.configured === true,
+          sqsConnected: order.data?.sqs?.connected === true,
+          outboxPending: order.data?.outbox?.pending ?? null,
+          error: order.error
+        },
+        inventory: { ok: inventory.ok, status: inventory.data?.status || 'UNKNOWN', error: inventory.error },
+        auth: { ok: auth.ok, status: auth.data?.status || 'UNKNOWN', error: auth.error },
+        worker: {
+          ok: worker.ok && worker.data?.isPolling === true,
+          status: worker.ok && worker.data?.isPolling === true ? 'UP' : 'UNKNOWN',
+          workerState: worker.data?.isPolling ? 'POLLING' : 'NOT_POLLING',
+          messagesProcessed: worker.data?.messagesProcessed ?? null,
+          lastProcessed: worker.data?.lastProcessed || null,
+          error: worker.error
+        }
+      }
+    }));
   }
 
   // Reverse proxy routing to internal microservices
