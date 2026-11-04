@@ -175,6 +175,7 @@ jobs:
 
           commit = os.environ['APP_COMMIT']
           branch = os.environ.get('BRANCH_NAME', 'dev')
+          target_env = 'prod' if branch == 'main' else branch
 
           services = {
               'frontend': 'reliabilityshop/frontend',
@@ -197,7 +198,7 @@ jobs:
               digests[name] = (repository, digest)
 
           targets = [
-              pathlib.Path(f'platform/gitops/applications/reliability-shop/envs/{branch}/kustomization.yaml'),
+              pathlib.Path(f'platform/gitops/applications/reliability-shop/envs/{target_env}/kustomization.yaml'),
               pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml'),
           ]
           for path in targets:
