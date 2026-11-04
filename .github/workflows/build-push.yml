@@ -180,8 +180,6 @@ jobs:
               'auth-service': 'reliabilityshop/auth-service',
               'payment-worker': 'reliabilityshop/payment-worker',
           }
-          path = pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml')
-          source = path.read_text(encoding='utf-8')
           digests = {}
           for name, repository in services.items():
               digest = subprocess.check_output([
@@ -194,11 +192,18 @@ jobs:
               if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
                   raise SystemExit(f'No valid digest found for {repository}:git-{commit}')
               digests[name] = (repository, digest)
-              pattern = rf'(  - name: {re.escape(repository)}\n    newName: [^\n]+\n    digest: )sha256:[0-9a-f]{{64}}'
-              source, count = re.subn(pattern, rf'\g<1>{digest}', source)
-              if count != 1:
-                  raise SystemExit(f'Expected one image entry for {repository}, found {count}')
-          path.write_text(source, encoding='utf-8', newline='\n')
+
+          targets = [
+              pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml'),
+              pathlib.Path('platform/gitops/applications/reliability-shop/envs/dev/kustomization.yaml'),
+          ]
+          for path in targets:
+              if path.exists():
+                  source = path.read_text(encoding='utf-8')
+                  for name, (repository, digest) in digests.items():
+                      pattern = rf'(  - name: {re.escape(repository)}\n    newName: [^\n]+\n    digest: )sha256:[0-9a-f]{{64}}'
+                      source, count = re.subn(pattern, rf'\g<1>{digest}', source)
+                  path.write_text(source, encoding='utf-8', newline='\n')
 
           rows = [
               "| Dịch vụ (Service) | Tag Image | ECR Immutable Digest |",
@@ -230,7 +235,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add gitops/applications/reliability-shop/base/kustomization.yaml
+          git add gitops/applications/reliability-shop/
           git commit -m "deploy(app3): promote $SHORT_SHA image digests"
           git push origin "$BRANCH" --force
 
