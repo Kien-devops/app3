@@ -65,6 +65,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({
       status: 'UP',
       service: 'frontend',
+      version: 'v1.1.0',
       uptime: process.uptime(),
       timestamp: new Date().toISOString()
     }));
