@@ -2,7 +2,7 @@ name: Build, Scan, and Push ECR Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging, dev]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
     uses: ./.github/workflows/security-scan.yml
 
   build-scan-push:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/dev'
     needs: [test, security]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -128,7 +128,7 @@ jobs:
           echo "- $REPOSITORY@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   promote-gitops:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/dev'
     needs: [test, security, build-scan-push]
     runs-on: ubuntu-latest
     timeout-minutes: 15
