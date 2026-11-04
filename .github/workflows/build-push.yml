@@ -2,7 +2,7 @@ name: Build, Scan, and Push ECR Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging, dev]
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
     uses: ./.github/workflows/security-scan.yml
 
   build-scan-push:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/dev'
     needs: [test, security]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -160,10 +160,11 @@ jobs:
           token: ${{ secrets.GITOPS_REPO_TOKEN }}
           path: platform
 
-      - name: Resolve ECR digests and update GitOps base
+      - name: Resolve ECR digests and update GitOps overlay
         id: update
         env:
           APP_COMMIT: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
           python - <<'PY'
@@ -173,6 +174,16 @@ jobs:
           import subprocess
 
           commit = os.environ['APP_COMMIT']
+          branch = os.environ.get('BRANCH_NAME', 'main')
+
+          # Map git branch to GitOps environment overlay
+          if branch == 'dev':
+              target_env = 'dev'
+          elif branch == 'staging':
+              target_env = 'staging'
+          else:
+              target_env = 'prod'
+
           services = {
               'frontend': 'reliabilityshop/frontend',
               'order-service': 'reliabilityshop/order-service',
@@ -194,9 +205,11 @@ jobs:
               digests[name] = (repository, digest)
 
           targets = [
-              pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml'),
-              pathlib.Path('platform/gitops/applications/reliability-shop/envs/dev/kustomization.yaml'),
+              pathlib.Path(f'platform/gitops/applications/reliability-shop/envs/{target_env}/kustomization.yaml'),
           ]
+          if target_env == 'dev':
+              targets.append(pathlib.Path('platform/gitops/applications/reliability-shop/base/kustomization.yaml'))
+
           for path in targets:
               if path.exists():
                   source = path.read_text(encoding='utf-8')
@@ -213,6 +226,10 @@ jobs:
               rows.append(f"| `{name}` | `git-{commit[:7]}` | `{dig}` |")
           with open('digests_table.md', 'w', encoding='utf-8') as f:
               f.write("\n".join(rows))
+
+          # Export target environment for subsequent steps
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f:
+              f.write(f"TARGET_ENV={target_env}\n")
           PY
 
       - name: Commit branch and open Pull Request with CI Evaluation Report
@@ -226,27 +243,28 @@ jobs:
         shell: bash
         run: |
           if git diff --quiet; then
-            echo 'GitOps already references these image digests. No changes needed.' >> "$GITHUB_STEP_SUMMARY"
+            echo "GitOps $TARGET_ENV already references these image digests. No changes needed." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           SHORT_SHA=${APP_COMMIT:0:7}
-          BRANCH="gitops/app3-promote-$SHORT_SHA"
+          BRANCH="gitops/app3-promote-${TARGET_ENV}-$SHORT_SHA"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
           git add gitops/applications/reliability-shop/
-          git commit -m "deploy(app3): promote $SHORT_SHA image digests"
+          git commit -m "deploy(app3): promote $SHORT_SHA image digests to $TARGET_ENV"
           git push origin "$BRANCH" --force
 
           DIGEST_TABLE=$(cat ../digests_table.md)
 
           PR_BODY=$(cat <<EOF
-          ## 🚀 SRE GitOps Promotion: App3 Commit \`$SHORT_SHA\`
+          ## 🚀 SRE GitOps Promotion: App3 Commit \`$SHORT_SHA\` ➔ \`$TARGET_ENV\`
 
           ### 🛡️ 1. Đánh giá Quá trình CI & Quality Gates
           | Hạng mục kiểm tra | Công cụ thực hiện | Trạng thái | Đánh giá SRE |
           | :--- | :--- | :---: | :--- |
+          | **Môi trường đích** | Kustomize Overlay | 🎯 **\`$TARGET_ENV\`** | Áp dụng cấu hình \`envs/$TARGET_ENV/\` |
           | **Unit & Integration Tests** | Node.js Test Runner | ✅ **PASSED** | 100% tests đạt, Code Coverage >= 80% |
           | **Secret Leak Scanning** | Gitleaks | ✅ **PASSED** | 0 secrets, credentials hoặc token rò rỉ |
           | **Container Vulnerability** | Aqua Trivy Scanner | ✅ **PASSED** | Đạt chuẩn: **0 CRITICAL, 0 HIGH CVEs** |
@@ -254,13 +272,14 @@ jobs:
 
           ---
 
-          ### 📦 2. Danh sách Image Digests Đề xuất Cập nhật
+          ### 📦 2. Danh sách Image Digests Đề xuất Cập nhật (\`$TARGET_ENV\`)
           $DIGEST_TABLE
 
           ---
 
           ### 🔍 3. Thông tin Truy vết Nguồn gốc (Traceability)
           * **Source Repository:** \`Kien-devops/app3\`
+          * **Source Branch:** \`${{ github.ref_name }}\`
           * **Commit SHA:** [\`$APP_COMMIT\`](https://github.com/Kien-devops/app3/commit/$APP_COMMIT)
           * **Commit Message:** \`$COMMIT_MSG\`
           * **Triggered By:** @$ACTOR
@@ -269,20 +288,20 @@ jobs:
           ---
           > 💡 **Hướng dẫn duyệt (Merge Gate):**
           > Sau khi kiểm tra diff và bảng đánh giá chất lượng bên trên, Kỹ sư SRE / Lead chỉ cần bấm **"Merge pull request"**.
-          > Argo CD sẽ tự động phát hiện nhánh \`main\` thay đổi và triển khai phiên bản mới lên cụm EKS theo nguyên tắc GitOps.
+          > Argo CD sẽ tự động đồng bộ thay đổi vào môi trường **\`$TARGET_ENV\`** theo nguyên tắc GitOps.
           EOF
           )
 
           EXISTING_PR=$(gh pr list --repo "$PLATFORM_REPOSITORY" --head "$BRANCH" --json number --jq '.[0].number')
           if [ -n "$EXISTING_PR" ]; then
             echo "Updating existing PR #$EXISTING_PR"
-            gh pr edit "$EXISTING_PR" --repo "$PLATFORM_REPOSITORY" --title "deploy(app3): promote $SHORT_SHA image digests" --body "$PR_BODY"
+            gh pr edit "$EXISTING_PR" --repo "$PLATFORM_REPOSITORY" --title "deploy(app3): promote $SHORT_SHA image digests to $TARGET_ENV" --body "$PR_BODY"
           else
             echo "Creating new PR"
             gh pr create \
               --repo "$PLATFORM_REPOSITORY" \
               --base main \
               --head "$BRANCH" \
-              --title "deploy(app3): promote $SHORT_SHA image digests" \
+              --title "deploy(app3): promote $SHORT_SHA image digests to $TARGET_ENV" \
               --body "$PR_BODY"
           fi
